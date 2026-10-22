@@ -7,7 +7,7 @@
 
 uint8_t MY_HEAP[64000];
 
-typedef struct metadata {
+typedef struct {
 
     int blockSize;
     uint8_t *nextFree;
@@ -18,7 +18,9 @@ typedef struct metadata {
 /* DEBUG */
 static void printMem(int end) {
 
+    printf("\n");
     for (int i = 0; i < end; i++) printf("%d ", MY_HEAP[i]);
+    printf("\n");
 }
 
 static void place_block(uint8_t *ptr, size_t size) {
@@ -33,6 +35,16 @@ static void place_block(uint8_t *ptr, size_t size) {
     }
 }
 
+static size_t ClosestMultipleOfEight(size_t n) {
+
+    if (n % 8 != 0) {
+
+        return ((n / 8)+1) * 8;  // Add padding
+    } 
+
+    return n;
+}
+
 /* Setup initial memory */
 static void init() {
 
@@ -41,23 +53,46 @@ static void init() {
 
     // Add first header
     Metadata *firstBlock = (Metadata *) MY_HEAP;
-    firstBlock->blockSize = (sizeof(Metadata) / 8) * 8;
-    firstBlock->nextFree = (uint8_t *) firstBlock + firstBlock->blockSize + 1; 
-    firstBlock->prevFree = NULL;
+    firstBlock->blockSize = ClosestMultipleOfEight(sizeof(Metadata));
 
-    return;
 }
 
 void *my_malloc(size_t size) {
 
     // Set new size of block for alignment
-    size_t newSize = size;
-    if (size % 8 != 0) {
-
-        newSize = (((int) size / 8)+1) * 8;  // Add padding
-    } 
+    size_t newSize = ClosestMultipleOfEight(size);
 
     printf("New size for malloc(%d) is %d\n", size, newSize);
+
+    // Find best fit
+    size_t minSize = INT32_MAX;
+    uint8_t *address = NULL; // The address at which to put the block
+    Metadata *cursor = (Metadata *) MY_HEAP;
+    while (cursor->nextFree != NULL) {
+
+        printf("Current : %p\n", cursor);
+        // If size is exact, stop the loop
+        if (newSize == cursor->blockSize) {
+
+            minSize = cursor->blockSize;
+            address = (uint8_t *) cursor;
+            break;
+        } 
+
+        // Find smallest fitting block
+        if (newSize < cursor->blockSize) {
+
+            minSize = cursor->blockSize;
+            address = (uint8_t *) cursor;
+        } 
+
+        cursor = (Metadata *) cursor->nextFree;
+    }
+    printf("The address is %p with min size %d\n", address, minSize);
+
+    // Add header
+    // Add footer
+    // Return address
 
     return NULL;
 }
@@ -72,11 +107,9 @@ void my_free(void *ptr) {
 int main(int argc, char *argv[]) {
 
     init(); // Call to init() function to set memory to initial state
+
+    printf("Address of heap : %p\n", MY_HEAP);
     uint8_t *ptr = my_malloc(2);
-    uint8_t *ptr1 = my_malloc(9);
-    uint8_t *ptr2 = my_malloc(13);
-    uint8_t *ptr3 = my_malloc(16);
-    //printf("Adress of ptr : %p, value of size : %d\n", ptr, *(ptr-3));
     printMem(50);
     return EXIT_SUCCESS;
 }
