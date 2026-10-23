@@ -1,9 +1,9 @@
+#include <stdint.h>
 #include <stdio.h>
-#include <stdint.h> 
 
 #define HEAP_SIZE 64000
 #define ALIGNMENT 8
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
+#define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1))
 
 uint8_t MY_HEAP[HEAP_SIZE];
 
@@ -13,111 +13,107 @@ typedef struct {
     uint8_t *prevFree;
 } Metadata;
 
-// Déclaration globale du pointeur vers le premier bloc libre
-uint8_t *free_list_head = NULL;
-
 void init() {
-    Metadata* first_block = (Metadata *)MY_HEAP; 
 
-    // infos du first_block (on aligne la taille disponible)
-    first_block->blockSize = HEAP_SIZE - ALIGN(sizeof(Metadata));
-    first_block->nextFree = NULL; 
-    first_block->prevFree = NULL; 
-    
-    free_list_head = MY_HEAP;
+    Metadata *first_block = (Metadata *)MY_HEAP;
+
+    first_block->blockSize = HEAP_SIZE - ALIGN(sizeof(Metadata)) | 0x01; // Set last bit to 1 to mark as private
+    first_block->nextFree = NULL;
+    first_block->prevFree = NULL;
 }
 
-// ATTENTION : La fonction doit retourner void* et non void
-void* my_malloc(size_t size) {
-    if (size == 0) {
-        return NULL; 
-    }
+static void *place_block(uint8_t *address, int size) {
+    
+    // Set total size with padding
+    size_t total_block_size = ALIGN(sizeof(Metadata)) + ALIGN(size);
 
-    // Alignement 
-    size_t aligned_size = ALIGN(size);
+    Metadata *cursor = (Metadata *) MY_HEAP;
+    if (cursor->blockSize > total_block_size) { // If we have too much space, split memory in two
 
-    // Parcourt la liste 
-    uint8_t *current_pointer = free_list_head; 
+        // Create metadata for next free block
+        Metadata *new_free_meta = (Metadata *) cursor + total_block_size;
 
-    while (current_pointer != NULL) {
-        Metadata *current_meta = (Metadata *)current_pointer; 
+        new_free_meta->blockSize = cursor->blockSize - total_block_size;
+        new_free_meta->nextFree = cursor->nextFree;
+        new_free_meta->prevFree = cursor->prevFree;
 
-        // Le bloc est assez grand ? 
-        if (current_meta->blockSize >= aligned_size) {
+        printf("Successfully created new block at address %p of size %d, with nextFree %p and prevFree %p\n", new_free_meta, new_free_meta->blockSize, new_free_meta->nextFree, new_free_meta->prevFree); 
 
-            // On découpe s'il reste assez de place pour un nouveau bloc complet
-            size_t total_block_size = ALIGN(sizeof(Metadata)) + aligned_size; 
-            
-            if (current_meta->blockSize >= total_block_size + ALIGN(sizeof(Metadata))) {
-                // Je crée un nouveau bloc libre pour le reste 
-                uint8_t *new_free_pointer = current_pointer + total_block_size; 
-                Metadata *new_free_meta = (Metadata *)new_free_pointer; 
-
-                new_free_meta->blockSize = current_meta->blockSize - total_block_size; 
-                new_free_meta->nextFree = current_meta->nextFree; 
-                new_free_meta->prevFree = current_meta->prevFree; 
-
-                // Mettre à jour les liens de la liste libre 
-                if (new_free_meta->nextFree != NULL) {
-                    ((Metadata *)(new_free_meta->nextFree))->prevFree = new_free_pointer;
-                }
-
-                current_meta->blockSize = aligned_size; 
-                current_meta->nextFree = new_free_pointer;
-
-                // Retire le bloc de la liste libre (remplacement par le nouveau bloc découpé)
-                if (current_meta->prevFree != NULL) {
-                    ((Metadata *)(current_meta->prevFree))->nextFree = new_free_pointer;
-                } else {
-                    // C'était la tête de liste
-                    free_list_head = new_free_pointer;
-                }
-
-                if (new_free_meta->nextFree != NULL) {
-                    ((Metadata *)(new_free_meta->nextFree))->prevFree = new_free_pointer;
-                }
-
-                // Retourne l'adresse utile
-                return (void *)(current_pointer + ALIGN(sizeof(Metadata)));
-            } else {
-                // Pas assez de place pour découper, on prend tout le bloc
-                if (current_meta->prevFree != NULL) {
-                    ((Metadata *)(current_meta->prevFree))->nextFree = current_meta->nextFree;
-                } else {
-                    free_list_head = current_meta->nextFree;
-                }
-                if (current_meta->nextFree != NULL) {
-                    ((Metadata *)(current_meta->nextFree))->prevFree = current_meta->prevFree;
-                }
-
-                return (void *)(current_pointer + ALIGN(sizeof(Metadata)));
-            }
+        // Set next block's previous to next free block (inserting in linked list basically)
+        if (cursor->nextFree != NULL) {
+            ((Metadata *)(new_free_meta->nextFree))->prevFree = (uint8_t *) new_free_meta;
         }
 
-        current_pointer = current_meta->nextFree; 
+        // Set prev block's next to next free block (not this block, since it's used !)
+        if (cursor->prevFree != NULL) {
+            ((Metadata *)(cursor->prevFree))->nextFree = (uint8_t *) new_free_meta;
+        }
+
+        // Mark block as used
+        cursor->blockSize = cursor->blockSize | 0x1;
+
+        // Return the address after the metadata
+        return (void *)(cursor + ALIGN(sizeof(Metadata)));     
+
+    } else {
+
+        // If not enough space to split, we just take the whole block
+        if (cursor->prevFree != NULL) {
+            ((Metadata *)(cursor->prevFree))->nextFree = cursor->nextFree;
+        }
+
+        if (cursor->nextFree != NULL) {
+            ((Metadata *)(cursor->nextFree))->prevFree = cursor->prevFree;
+        }
+
+        return (void *)(cursor + ALIGN(sizeof(Metadata)));
+    }
+}
+
+void *my_malloc(size_t size) {
+
+    if (size <= 0) {
+        return NULL;
+    }
+
+    Metadata *cursor = (Metadata *) MY_HEAP;
+    int minSize = INT32_MAX;
+    uint8_t *address;
+
+    while (cursor != NULL) {
+
+        printf("Found block of size %d, comparing to %d\n", cursor->blockSize, minSize);
+        // Find best fit
+        if (cursor->blockSize < minSize) {
+
+            minSize = cursor->blockSize;
+            address = (uint8_t *) cursor;
+        }
+
+        cursor = (Metadata *) cursor->nextFree;
     }
 
     // Aucun bloc trouvé
-    return NULL; 
+    if (address == NULL) { return NULL; }
+
+    printf("Found address! %p\n", address);
+
+    return place_block(address, size);
 }
 
 int main(void) {
-    // TEST alignement 
-    for (int i = 0; i <= 32; i += 2) {
-        printf("ALIGN(%d) = %d\n", i, (int)ALIGN(i)); 
-    }
 
-    init();
-    
-    // Test my_malloc
-    void *ptr1 = my_malloc(1);
-    printf("Adresse allouée 1 : %p\n", ptr1);
+  init();
 
-    void *ptr2 = my_malloc(17);
-    printf("Adresse allouée 2 : %p\n", ptr2);
+  // Test my_malloc
+  void *ptr1 = my_malloc(1);
+  printf("Adresse allouée 1 : %p\n", ptr1);
 
-    void *ptr3 = my_malloc(13);
-    printf("Adresse allouée 2 : %p\n", ptr3);
+  void *ptr2 = my_malloc(17);
+  printf("Adresse allouée 2 : %p\n", ptr2);
 
-    return 0;
+  void *ptr3 = my_malloc(13);
+  printf("Adresse allouée 3 : %p\n", ptr3);
+
+  return 0;
 }
