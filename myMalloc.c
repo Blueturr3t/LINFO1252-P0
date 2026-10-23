@@ -110,11 +110,14 @@ int main(void) {
     init();
     
     // Test my_malloc
-    void *ptr1 = my_malloc(100);
+    void *ptr1 = my_malloc(1);
     printf("Adresse allouée 1 : %p\n", ptr1);
 
-    void *ptr2 = my_malloc(200);
+    void *ptr2 = my_malloc(17);
     printf("Adresse allouée 2 : %p\n", ptr2);
+
+    void *ptr3 = my_malloc(13);
+    printf("Adresse allouée 2 : %p\n", ptr3);
 
     return 0;
 }
