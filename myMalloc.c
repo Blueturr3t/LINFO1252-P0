@@ -116,6 +116,46 @@ void *my_malloc(size_t size) {
     return place_block((uint8_t *)best_block, size);
 }
 
+void my_free(void *ptr){
+    
+    // l'adresse est décalée donc on recule de la taille des métadata 
+    // le bloc est de nouveau libre donc on passe son bit de poid faible a 0
+    // Il faut remettre le bloc dans la liste des blocs libres 
+
+    if (ptr == NULL){
+        return; 
+    }
+
+    Metadata *block = (Metadata *)((uint8_t *)ptr - ALIGN(sizeof(Metadata)));
+
+    if (!(block->blockSize & 0x1)){
+        return;
+    }
+
+    block->blockSize = block->blockSize & ~0x1; 
+
+    Metadata *header = (Metadata *)MY_HEAP; 
+    Metadata *old_head_free = (Metadata *)header->nextFree;
+
+    // new block points towards old head
+    block->nextFree = (uint8_t *) old_head_free; 
+    block->prevFree = (uint8_t *) header; 
+
+    if (old_head_free != NULL){
+        old_head_free->prevFree = (uint8_t *) block;
+    }
+
+    header->nextFree = (uint8_t *)block; 
+
+    printf("Bloc à l'adresse %p libéré avec succès\n", ptr);
+
+
+}
+
+
+
+
+
 int main(void) {
     init();
 
@@ -128,6 +168,8 @@ int main(void) {
 
     void *ptr3 = my_malloc(13);
     printf("Adresse allouée 3 : %p\n\n", ptr3);
+
+    my_free(ptr1);
 
     return 0;
 }
